@@ -141,7 +141,7 @@ static const ONNX_NAMESPACE::GraphProto CreateSubgraph(const RunOptions& options
   bool_tensor.mutable_tensor_type()->set_elem_type(TensorProto_DataType_BOOL);
 
   TypeProto bool_tensor_single_dim{bool_tensor};
-  bool_tensor_single_dim.mutable_tensor_type()->mutable_shape()->add_dim();
+  bool_tensor_single_dim.mutable_tensor_type()->mutable_shape()->add_dim()->set_dim_value(1);
 
   TypeProto float_scalar;
   float_scalar.mutable_tensor_type()->set_elem_type(TensorProto_DataType_FLOAT);
