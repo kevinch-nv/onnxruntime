@@ -252,7 +252,7 @@ int real_main(int argc, char* argv[], Ort::Env& env) {
       }
       TestResultStat per_case_stat;
       std::vector<ITestCase*> per_case_tests = {l};
-      TestEnv per_case_args(per_case_tests, per_case_stat, env ,sf);
+      TestEnv per_case_args(per_case_tests, per_case_stat, env, sf);
       RunTests(per_case_args, 1, 1, 1, GetDefaultThreadPool(Env::Default()));
       stat += per_case_stat;
     });
@@ -299,8 +299,6 @@ int real_main(int argc, char* argv[], Ort::Env& env) {
       {"BatchNorm2d_momentum_eval", "disable reason"},
       {"BatchNorm3d_eval", "disable reason"},
       {"BatchNorm3d_momentum_eval", "disable reason"},
-      {"constantofshape_float_ones", "test data bug"},
-      {"constantofshape_int_zeros", "test data bug"},
       {"GLU", "disable reason"},
       {"GLU_dim", "disable reason"},
       {"Linear", "disable reason"},
