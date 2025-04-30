@@ -2003,3 +2003,7 @@ else()
     include("${CMAKE_CURRENT_SOURCE_DIR}/arm64x.cmake")
   endif()
 endif()
+
+if (onnxruntime_BUILD_CPP_SAMPLES)
+  include(onnxruntime_cpp_sample.cmake)
+endif()
