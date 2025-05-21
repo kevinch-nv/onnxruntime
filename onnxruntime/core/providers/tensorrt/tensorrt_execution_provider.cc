@@ -2824,9 +2824,9 @@ TensorrtExecutionProvider::GetCapability(const GraphViewer& graph,
   if (number_of_trt_nodes == 0) {
     LOGS_DEFAULT(WARNING) << "[TensorRT EP] No graph will run on TensorRT execution provider";
   } else if (number_of_trt_nodes == number_of_ort_nodes) {
-    LOGS_DEFAULT(INFO) << "[TensorRT EP] Whole graph will run on TensorRT execution provider";
+    LOGS_DEFAULT(WARNING) << "[TensorRT EP] Whole graph will run on TensorRT execution provider";
   } else {
-    LOGS_DEFAULT(INFO) << "[TensorRT EP] Graph is partitioned and number of subgraphs running on TensorRT execution provider is " << number_of_subgraphs;
+    LOGS_DEFAULT(WARNING) << "[TensorRT EP] Graph is partitioned and number of subgraphs running on TensorRT execution provider is " << number_of_subgraphs;
   }
 
   // The context map is only used during EP compile time, release it to save memory space.
@@ -2846,7 +2846,7 @@ common::Status TensorrtExecutionProvider::RefitEngine(std::string onnx_model_fil
                                                       nvinfer1::ICudaEngine* trt_engine,
                                                       bool serialize_refitted_engine,
                                                       bool detailed_build_log) {
-#if NV_TENSORRT_MAJOR >= 10
+//#if NV_TENSORRT_MAJOR >= 10
   bool refit_from_file = onnx_model_bytestream == nullptr && onnx_model_bytestream_size == 0;
   std::filesystem::path onnx_model_path{onnx_model_folder_path};
   if (refit_from_file) {
@@ -2885,13 +2885,18 @@ common::Status TensorrtExecutionProvider::RefitEngine(std::string onnx_model_fil
   auto parser_refitter = std::unique_ptr<nvonnxparser::IParserRefitter>(
       nvonnxparser::createParserRefitter(*refitter, trt_logger));
   if (refit_from_file) {
+    std::cout << "1\n";
     LOGS_DEFAULT(VERBOSE) << "[TensorRT EP] Refitting from file on disk: " << onnx_model_path.string();
     if (!parser_refitter->refitFromFile(onnx_model_path.string().c_str())) {
       return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
                              "TensorRT EP's IParserRefitter could not refit deserialized weight-stripped engine with weights contained in: " + onnx_model_path.string());
     }
   } else {
+    std::cout << "2\n";
     LOGS_DEFAULT(VERBOSE) << "[TensorRT EP] Refitting from byte array";
+
+
+
     if (!parser_refitter->refitFromBytes(onnx_model_bytestream, onnx_model_bytestream_size)) {
       return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
                              "TensorRT EP's IParserRefitter could not refit deserialized weight-stripped engine with weights contained in the provided bytestraem");
@@ -2913,9 +2918,9 @@ common::Status TensorrtExecutionProvider::RefitEngine(std::string onnx_model_fil
     LOGS_DEFAULT(VERBOSE) << "[TensorRT EP] Serialize the refitted engine to " << refitted_engine_cache;
   }
   return Status::OK();
-#else
-  return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP's IParserRefitter can only be used on TRT 10.0 onwards.");
-#endif
+// #else
+//   return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP's IParserRefitter can only be used on TRT 10.0 onwards.");
+// #endif
 }
 
 common::Status TensorrtExecutionProvider::Compile(const std::vector<FusedNodeAndGraph>& fused_nodes_and_graphs,
@@ -3383,7 +3388,8 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
     ctx_model_path_ = GetCtxModelPath(ep_context_file_path_, model_path_);
   }
 
-  if (!has_dynamic_shape) {
+//  if (!has_dynamic_shape) {
+  if (true){
     std::string timing_cache_path = "";
     bool engine_update = false;
     if (timing_cache_enable_) {
@@ -3474,12 +3480,52 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
         if (detailed_build_log_) {
           engine_build_start = std::chrono::steady_clock::now();
         }
+
+        std::cout << "CREATING ENGINE!" << std::endl;
+
+        // Force refit to test
+        trt_config->setFlag(nvinfer1::BuilderFlag::kREFIT);
+
         std::unique_ptr<nvinfer1::IHostMemory> serialized_engine{trt_builder->buildSerializedNetwork(*trt_network, *trt_config)};
         if (serialized_engine == nullptr) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
                                  "TensorRT EP failed to create engine from network for fused node: " + fused_node.Name());
         }
         trt_engine = std::unique_ptr<nvinfer1::ICudaEngine>(runtime_->deserializeCudaEngine(serialized_engine->data(), serialized_engine->size()));
+
+
+        // TEST REFIT HERE!
+
+        auto refitter = std::unique_ptr<nvinfer1::IRefitter>(nvinfer1::createInferRefitter(*trt_engine, trt_logger));
+        auto parser_refitter = std::unique_ptr<nvonnxparser::IParserRefitter>(
+          nvonnxparser::createParserRefitter(*refitter, trt_logger));
+
+        bool refitloadSuccess = parser_refitter->loadModelProto(string_buf.data(), string_buf.size(), model_path_);
+        std::cout << "REFIT: Load success: " << refitloadSuccess << std::endl;
+
+        std::cout << names.size() << std::endl;;
+        std::cout << bytes.size() << std::endl;
+        std::cout << sizes.size() << std::endl;
+        std::cout << string_buf.size() << std::endl;
+
+        bytes.clear();
+        std::vector<std::vector<float>>data;
+        for (size_t i = 0 ; i < names.size(); i++)
+        {
+          auto s = sizes[i];
+          std::vector<float> tmp(s, 1.0f);
+          data.push_back(tmp);
+        }
+
+        bool refloadInit = parser_refitter->loadInitializers(names.data(), bytes.data(), sizes.data(), names.size());
+        std::cout << "REFIT: LoadInit success: " << refloadInit << std::endl;
+
+        bool refparseModelProto = parser_refitter->refitModelProto();
+        std::cout << "REFIT parsemodel success: " << refparseModelProto << std::endl;
+
+        //! END REFIT!
+
+
         if (trt_engine == nullptr) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
                                  "TensorRT EP failed to deserialize engine for fused node: " + fused_node.Name());
@@ -3974,16 +4020,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
         if (detailed_build_log_) {
           engine_build_start = std::chrono::steady_clock::now();
         }
-        serialized_engine = std::unique_ptr<nvinfer1::IHostMemory>(
-            trt_builder->buildSerializedNetwork(*trt_state->network->get(), *trt_config));
-        if (!serialized_engine) {
-          return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP failed to create engine from network.");
-        }
-        *(trt_state->engine) = std::unique_ptr<nvinfer1::ICudaEngine>(
-            trt_state->runtime->deserializeCudaEngine(serialized_engine->data(), serialized_engine->size()));
-        if (!(*(trt_state->engine))) {
-          return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP failed to deserialize engine.");
-        }
+
         if (detailed_build_log_) {
           auto engine_build_stop = std::chrono::steady_clock::now();
           LOGS_DEFAULT(INFO) << "TensorRT engine build for " << trt_state->trt_node_name_with_precision << " took: " << std::chrono::duration_cast<std::chrono::milliseconds>(engine_build_stop - engine_build_start).count() << "ms" << std::endl;
