@@ -11,7 +11,8 @@ void GraphViewerToProto(const GraphViewer& graph_view,
                         ONNX_NAMESPACE::GraphProto& graph_proto,
                         bool include_initializer,
                         bool include_outer_scope_args,
-                        ExecutionOrder order) {
+                        ExecutionOrder order,
+                        bool include_initializer_data) {
   graph_proto.set_name(graph_view.Name());
   graph_proto.set_doc_string(graph_view.Description());
 
@@ -88,45 +89,38 @@ void GraphViewerToProto(const GraphViewer& graph_view,
     };
 
     // Handle this scope initializers
-    // for (const auto& it : const_inits) {
-    //   const auto& [name, init] = *it;
-    //   current_scope_initializer_set.insert(name);
-    //   auto* p_initializer = graph_proto.add_initializer();
-    //   ORT_THROW_IF_ERROR(get_initializer_with_data(*init, *p_initializer));
-    // CHANGE: write everything EXCEPT data. TODO: Move this to a different flag.
-    // TODO: Handle non-raw data?
-
-    for (auto& it : const_inits) {
-
+    for (const auto& it : const_inits) {
+      const auto& [name, init] = *it;
+      current_scope_initializer_set.insert(name);
       auto* p_initializer = graph_proto.add_initializer();
 
-      auto* init = initializers.at(it);
-
-      if (init->has_raw_data())
+      // Do not save raw initializers into the graph.
+      if (!include_initializer_data && init->has_raw_data())
       {
-        std::cout << "ORT: writing init: " << it << std::endl;
-        // Set datatype
-        if (init->has_data_type())
+        if (init->has_raw_data())
         {
-          p_initializer->set_data_type(init->data_type());
-        }
-        // Set name
-        if (init->has_name())
-        {
-          p_initializer->set_name(init->name());
-        }
+          // Set datatype
+          if (init->has_data_type())
+          {
+            p_initializer->set_data_type(init->data_type());
+          }
+          // Set name
+          if (init->has_name())
+          {
+            p_initializer->set_name(init->name());
+          }
 
-        // Set dims
-        for (int i = 0; i < init->dims_size(); ++i)
-        {
-          p_initializer->add_dims(init->dims()[i]);
+          // Set dims
+          for (int i = 0; i < init->dims_size(); ++i)
+          {
+            p_initializer->add_dims(init->dims()[i]);
+          }
         }
       }
       else
       {
-        *p_initializer = *(initializers.at(it));
+        ORT_THROW_IF_ERROR(get_initializer_with_data(*init, *p_initializer));
       }
-      current_scope_initializer_set.insert(it);
     }
 
     // handle outer scope value which is a constant initializer

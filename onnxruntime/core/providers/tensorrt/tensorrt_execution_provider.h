@@ -157,6 +157,13 @@ class OutputAllocator : public nvinfer1::IOutputAllocator {
  */
 using ShapeRangesMap = std::unordered_map<std::string, std::unordered_map<size_t, std::vector<std::vector<int64_t>>>>;
 
+// Struct to hold user data. TODO: Copy the data for now?
+struct TensorrtUserWeights {
+  std::string name{};
+  std::string data{};
+  int64_t size{};
+};
+
 // Information to construct kernel function state.
 struct TensorrtFuncState {
   AllocateFunc test_allocate_func = nullptr;
@@ -205,6 +212,7 @@ struct TensorrtFuncState {
   std::string cache_suffix;
   bool engine_hw_compatible = false;
   std::vector<nvinfer1::PreviewFeature> preview_features;
+  std::unique_ptr<std::vector<TensorrtUserWeights>>* userWeights = nullptr;
 };
 
 // Minimum information to construct kernel function state for direct engine load code path
@@ -380,6 +388,7 @@ class TensorrtExecutionProvider : public IExecutionProvider {
   std::unordered_map<std::string, ShapeRangesMap> input_shape_ranges_;  // The profile shape ranges that the engine is built with
   std::unordered_map<std::string, std::vector<nvinfer1::IOptimizationProfile*>> profiles_;
   std::unordered_map<std::string, DDSOutputAllocatorMap> dds_output_allocator_maps_;
+  std::unordered_map<std::string, std::unique_ptr<std::vector<TensorrtUserWeights>>> weights_; // User provided weights.
 
   // for external stream, we need to create its cudnn/cublass handle before cuda EP enable cuda graph capture
   cudnnHandle_t external_cudnn_handle_ = nullptr;

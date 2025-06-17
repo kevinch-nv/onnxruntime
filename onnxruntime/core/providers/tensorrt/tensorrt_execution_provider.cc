@@ -2320,31 +2320,22 @@ SubGraphCollection_t TensorrtExecutionProvider::GetSupportedList(SubGraphCollect
         // The reason is, in some cases, for example ResNet50, using default topological sort will end up with generating
         // the model proto that has different node ordering compared to original onnx model.
 
-        // Set export initializers to false so that we can succesfully serialize.
-
-        std::vector<const char*> names;
-        std::vector<const char*> bytes;
-        std::vector<int64_t> sizes;
+        // Save Initializer Data.
+        std::vector<TensorrtUserWeights> userWeights;
 
         auto allInitializers = graph_viewer->GetAllInitializedTensors();
 
         for (auto entry : allInitializers)
         {
-            auto name = entry.first;
             auto* tp = entry.second;
-
-            std::cout << "ORT: Saving initializers in mem: " << tp->name() << ", has raw data? " << tp->has_raw_data() << std::endl;
-
-            // TODO: Handle non-raw-data?
             if (tp->has_raw_data())
             {
-              names.push_back(tp->name().c_str());
-              bytes.push_back(tp->raw_data().c_str());
-              sizes.push_back(tp->raw_data().size());
+              userWeights.push_back(
+                TensorrtUserWeights{tp->name(), tp->raw_data(), (int64_t)tp->raw_data().size()});
             }
         }
 
-        graph_viewer->ToProto(*model_proto->mutable_graph(), true, true, 1 /*priority-based topological sort*/);
+        graph_viewer->ToProto(*model_proto->mutable_graph(), true, true, 1 /*priority-based topological sort*/, false);
         model_proto->set_ir_version(ONNX_NAMESPACE::Version::IR_VERSION);
 
         std::string string_buf;
@@ -2372,17 +2363,13 @@ SubGraphCollection_t TensorrtExecutionProvider::GetSupportedList(SubGraphCollect
 
 #if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 1) || NV_TENSORRT_MAJOR > 10
 
-        bool loadSuccess = trt_parser->loadModelProto(string_buf.data(), string_buf.size(), model_path_);
-        std::cout << "Load success (SupportedList): " << loadSuccess << std::endl;
+        trt_parser->loadModelProto(string_buf.data(), string_buf.size(), model_path_);
+        for (auto const& userWeight : userWeights)
+        {
+          trt_parser->loadInitializer(userWeight.name.c_str(), static_cast<void const*>(userWeight.data.c_str()), userWeight.size);
+        }
 
-        bool loadInit = trt_parser->loadInitializers(names.data(), bytes.data(), sizes.data(), names.size());
-        std::cout << "LoadInit success (SupportedList): " << loadInit << std::endl;
-
-        // bool parseModelProto = trt_parser->parseModelProto();
-        // std::cout << "parsemodel success: " << parseModelProto << std::endl;
-
-        auto is_model_supported = trt_parser->supportsModelV3();
-        std::cout << "SupportsV3 success (SupportedList): " << is_model_supported << std::endl;
+        bool is_model_supported = trt_parser->parseModelProto();
 
         //ORT_THROW_IF_ERROR(ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "test"));
 
@@ -2824,9 +2811,9 @@ TensorrtExecutionProvider::GetCapability(const GraphViewer& graph,
   if (number_of_trt_nodes == 0) {
     LOGS_DEFAULT(WARNING) << "[TensorRT EP] No graph will run on TensorRT execution provider";
   } else if (number_of_trt_nodes == number_of_ort_nodes) {
-    LOGS_DEFAULT(WARNING) << "[TensorRT EP] Whole graph will run on TensorRT execution provider";
+    LOGS_DEFAULT(INFO) << "[TensorRT EP] Whole graph will run on TensorRT execution provider";
   } else {
-    LOGS_DEFAULT(WARNING) << "[TensorRT EP] Graph is partitioned and number of subgraphs running on TensorRT execution provider is " << number_of_subgraphs;
+    LOGS_DEFAULT(INFO) << "[TensorRT EP] Graph is partitioned and number of subgraphs running on TensorRT execution provider is " << number_of_subgraphs;
   }
 
   // The context map is only used during EP compile time, release it to save memory space.
@@ -2846,7 +2833,7 @@ common::Status TensorrtExecutionProvider::RefitEngine(std::string onnx_model_fil
                                                       nvinfer1::ICudaEngine* trt_engine,
                                                       bool serialize_refitted_engine,
                                                       bool detailed_build_log) {
-//#if NV_TENSORRT_MAJOR >= 10
+#if NV_TENSORRT_MAJOR >= 10
   bool refit_from_file = onnx_model_bytestream == nullptr && onnx_model_bytestream_size == 0;
   std::filesystem::path onnx_model_path{onnx_model_folder_path};
   if (refit_from_file) {
@@ -2885,14 +2872,12 @@ common::Status TensorrtExecutionProvider::RefitEngine(std::string onnx_model_fil
   auto parser_refitter = std::unique_ptr<nvonnxparser::IParserRefitter>(
       nvonnxparser::createParserRefitter(*refitter, trt_logger));
   if (refit_from_file) {
-    std::cout << "1\n";
     LOGS_DEFAULT(VERBOSE) << "[TensorRT EP] Refitting from file on disk: " << onnx_model_path.string();
     if (!parser_refitter->refitFromFile(onnx_model_path.string().c_str())) {
       return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
                              "TensorRT EP's IParserRefitter could not refit deserialized weight-stripped engine with weights contained in: " + onnx_model_path.string());
     }
   } else {
-    std::cout << "2\n";
     LOGS_DEFAULT(VERBOSE) << "[TensorRT EP] Refitting from byte array";
 
 
@@ -2918,9 +2903,9 @@ common::Status TensorrtExecutionProvider::RefitEngine(std::string onnx_model_fil
     LOGS_DEFAULT(VERBOSE) << "[TensorRT EP] Serialize the refitted engine to " << refitted_engine_cache;
   }
   return Status::OK();
-// #else
-//   return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP's IParserRefitter can only be used on TRT 10.0 onwards.");
-// #endif
+#else
+  return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP's IParserRefitter can only be used on TRT 10.0 onwards.");
+#endif
 }
 
 common::Status TensorrtExecutionProvider::Compile(const std::vector<FusedNodeAndGraph>& fused_nodes_and_graphs,
@@ -2972,9 +2957,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
 
   // Set export initializers to false so that we can succesfully serialize.
 
-  std::vector<const char*> names;
-  std::vector<const char*> bytes;
-  std::vector<int64_t> sizes;
+  auto userWeights = std::make_unique<std::vector<TensorrtUserWeights>>();
 
   auto allInitializers = graph_body_viewer.GetAllInitializedTensors();
 
@@ -2985,9 +2968,8 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
       // TODO: Handle non-raw-data?
       if (tp->has_raw_data())
       {
-        names.push_back(tp->name().c_str());
-        bytes.push_back(tp->raw_data().c_str());
-        sizes.push_back(tp->raw_data().size());
+          userWeights->push_back(
+            TensorrtUserWeights{tp->name(), tp->raw_data(), (int64_t)tp->raw_data().size()});
       }
   }
 
@@ -2995,7 +2977,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
   // When creating model proto from graph viewer, let ORT use priority-based topological sort based on node index.
   // The reason is, in some cases, for example ResNet50, using default topological sort will end up with generating
   // the model proto that has different node ordering compared to original onnx model.
-  graph_body_viewer.ToProto(*model_proto->mutable_graph(), true, true, 1 /*priority-based topological sort*/);
+  graph_body_viewer.ToProto(*model_proto->mutable_graph(), true, true, 1 /*priority-based topological sort*/, false);
   model_proto->set_ir_version(ONNX_NAMESPACE::Version::IR_VERSION);
   std::string string_buf;
   model_proto->SerializeToString(string_buf);
@@ -3018,16 +3000,13 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
   auto trt_config = std::unique_ptr<nvinfer1::IBuilderConfig>(trt_builder->createBuilderConfig());
   auto trt_parser = tensorrt_ptr::unique_pointer<nvonnxparser::IParser>(nvonnxparser::createParser(*trt_network, trt_logger));
 
-  bool loadSuccess = trt_parser->loadModelProto(string_buf.data(), string_buf.size(), model_path_);
-  std::cout << "Load success: " << loadSuccess << std::endl;
+  trt_parser->loadModelProto(string_buf.data(), string_buf.size(), model_path_);
+  for (auto const& userWeight : *userWeights)
+  {
+    trt_parser->loadInitializer(userWeight.name.c_str(), static_cast<void const*>(userWeight.data.c_str()), userWeight.size);
+  }
+  trt_parser->parseModelProto();
 
-  bool loadInit = trt_parser->loadInitializers(names.data(), bytes.data(), sizes.data(), names.size());
-  std::cout << "LoadInit success: " << loadInit << std::endl;
-
-  bool parseModelProto = trt_parser->parseModelProto();
-  std::cout << "parsemodel success: " << parseModelProto << std::endl;
-
-  //trt_parser->parse(string_buf.data(), string_buf.size(), model_path_);
   if (max_workspace_size_ > 0) {
     trt_config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, max_workspace_size_);
   }
@@ -3388,8 +3367,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
     ctx_model_path_ = GetCtxModelPath(ep_context_file_path_, model_path_);
   }
 
-//  if (!has_dynamic_shape) {
-  if (true){
+ if (!has_dynamic_shape) {
     std::string timing_cache_path = "";
     bool engine_update = false;
     if (timing_cache_enable_) {
@@ -3481,50 +3459,12 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
           engine_build_start = std::chrono::steady_clock::now();
         }
 
-        std::cout << "CREATING ENGINE!" << std::endl;
-
-        // Force refit to test
-        trt_config->setFlag(nvinfer1::BuilderFlag::kREFIT);
-
         std::unique_ptr<nvinfer1::IHostMemory> serialized_engine{trt_builder->buildSerializedNetwork(*trt_network, *trt_config)};
         if (serialized_engine == nullptr) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
                                  "TensorRT EP failed to create engine from network for fused node: " + fused_node.Name());
         }
         trt_engine = std::unique_ptr<nvinfer1::ICudaEngine>(runtime_->deserializeCudaEngine(serialized_engine->data(), serialized_engine->size()));
-
-
-        // TEST REFIT HERE!
-
-        auto refitter = std::unique_ptr<nvinfer1::IRefitter>(nvinfer1::createInferRefitter(*trt_engine, trt_logger));
-        auto parser_refitter = std::unique_ptr<nvonnxparser::IParserRefitter>(
-          nvonnxparser::createParserRefitter(*refitter, trt_logger));
-
-        bool refitloadSuccess = parser_refitter->loadModelProto(string_buf.data(), string_buf.size(), model_path_);
-        std::cout << "REFIT: Load success: " << refitloadSuccess << std::endl;
-
-        std::cout << names.size() << std::endl;;
-        std::cout << bytes.size() << std::endl;
-        std::cout << sizes.size() << std::endl;
-        std::cout << string_buf.size() << std::endl;
-
-        bytes.clear();
-        std::vector<std::vector<float>>data;
-        for (size_t i = 0 ; i < names.size(); i++)
-        {
-          auto s = sizes[i];
-          std::vector<float> tmp(s, 1.0f);
-          data.push_back(tmp);
-        }
-
-        bool refloadInit = parser_refitter->loadInitializers(names.data(), bytes.data(), sizes.data(), names.size());
-        std::cout << "REFIT: LoadInit success: " << refloadInit << std::endl;
-
-        bool refparseModelProto = parser_refitter->refitModelProto();
-        std::cout << "REFIT parsemodel success: " << refparseModelProto << std::endl;
-
-        //! END REFIT!
-
 
         if (trt_engine == nullptr) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
@@ -3661,6 +3601,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
   engines_.emplace(fused_node.Name(), std::move(trt_engine));
   contexts_.emplace(fused_node.Name(), std::move(trt_context));
   networks_.emplace(fused_node.Name(), std::move(trt_network));
+  weights_.emplace(fused_node.Name(), std::move(userWeights));
   input_info_[fused_node.Name()].push_back(input_indexes);
   output_info_[fused_node.Name()].push_back(output_indexes);
   output_info_[fused_node.Name()].push_back(output_types);
@@ -3713,7 +3654,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
           engine_decryption_, engine_encryption_, timing_cache_enable_, global_cache_path_, force_timing_cache_match_,
           detailed_build_log_, build_heuristics_enable_, sparsity_enable_, builder_optimization_level_,
           auxiliary_streams_, !tactic_sources_.empty(), tactics, cuda_graph_enable_, cache_prefix_, cache_suffix, engine_hw_compatible_,
-          preview_features_};
+          preview_features_, &weights_[context->node_name]};
     *state = p.release();
     return 0;
   };
@@ -4021,6 +3962,16 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
           engine_build_start = std::chrono::steady_clock::now();
         }
 
+        serialized_engine = std::unique_ptr<nvinfer1::IHostMemory>(
+            trt_builder->buildSerializedNetwork(*trt_state->network->get(), *trt_config));
+        if (!serialized_engine) {
+          return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP failed to create engine from network.");
+        }
+        *(trt_state->engine) = std::unique_ptr<nvinfer1::ICudaEngine>(
+            trt_state->runtime->deserializeCudaEngine(serialized_engine->data(), serialized_engine->size()));
+        if (!(*(trt_state->engine))) {
+          return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP failed to deserialize engine.");
+        }
         if (detailed_build_log_) {
           auto engine_build_stop = std::chrono::steady_clock::now();
           LOGS_DEFAULT(INFO) << "TensorRT engine build for " << trt_state->trt_node_name_with_precision << " took: " << std::chrono::duration_cast<std::chrono::milliseconds>(engine_build_stop - engine_build_start).count() << "ms" << std::endl;
