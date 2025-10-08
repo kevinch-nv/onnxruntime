@@ -1364,10 +1364,12 @@ TensorrtExecutionProvider::TensorrtExecutionProvider(const TensorrtExecutionProv
 
   // Get environment variables
   if (info.has_trt_options) {
+    std::cout << "has_trt_options" << std::endl;
     max_partition_iterations_ = info.max_partition_iterations;
     min_subgraph_size_ = info.min_subgraph_size;
     max_workspace_size_ = info.max_workspace_size;
-    fp16_enable_ = info.fp16_enable;
+    // fp16_enable_ = info.fp16_enable;
+    fp16_enable_ = true;
     bf16_enable_ = info.bf16_enable;
     // BF16 support is primarily available on NVIDIA GPUs with the Ampere and later architectures with compute capability of 8.0 or higher.
     if (bf16_enable_ && prop.major < 8) {
@@ -1380,8 +1382,10 @@ TensorrtExecutionProvider::TensorrtExecutionProvider(const TensorrtExecutionProv
       int8_use_native_tensorrt_calibration_table_ = info.int8_use_native_calibration_table;
     }
     if (fp16_enable_ || int8_enable_) {  // DLA can only be enabled with FP16 or INT8
-      dla_enable_ = info.dla_enable;
-      dla_core_ = info.dla_core;
+      // dla_enable_ = info.dla_enable;
+      dla_enable_ = true;
+      // dla_core_ = info.dla_core;
+      dla_core_ = 0;
     }
     dump_subgraphs_ = info.dump_subgraphs;
     engine_cache_enable_ = info.engine_cache_enable;
@@ -1444,7 +1448,10 @@ TensorrtExecutionProvider::TensorrtExecutionProvider(const TensorrtExecutionProv
     op_types_to_exclude_ = info.op_types_to_exclude;
     preview_features_ = ParseTrtPreviewFeatures(info.preview_features);
     load_user_initializer_ = info.load_user_initializer;
+    // dla_capability_ = info.dla_capability;
+    dla_capability_ = true;
   } else {
+    std::cout << "no has_trt_options" << std::endl;
     try {
       const std::string max_partition_iterations_env = onnxruntime::GetEnvironmentVar(tensorrt_env_vars::kMaxPartitionIterations);
       if (!max_partition_iterations_env.empty()) {
@@ -1847,7 +1854,8 @@ TensorrtExecutionProvider::TensorrtExecutionProvider(const TensorrtExecutionProv
                         << ", trt_onnx_model_bytestream_size_: " << onnx_model_bytestream_size_
                         << ", trt_onnx_external_data_bytestream_size: " << onnx_external_data_bytestream_size_
                         << ", trt_op_types_to_exclude: " << op_types_to_exclude_
-                        << ", trt_load_user_initializer: " << load_user_initializer_;
+                        << ", trt_load_user_initializer: " << load_user_initializer_
+                        << ", trt_dla_capability: " << dla_capability_;
 }
 
 TensorrtExecutionProvider::~TensorrtExecutionProvider() {
@@ -2376,8 +2384,19 @@ SubGraphCollection_t TensorrtExecutionProvider::GetSupportedList(SubGraphCollect
 #endif
 
         auto trt_network = std::unique_ptr<nvinfer1::INetworkDefinition>(trt_builder->createNetworkV2(network_flags));
+        auto trt_config = tensorrt_ptr::unique_pointer<nvinfer1::IBuilderConfig>(trt_builder->createBuilderConfig());
         auto trt_parser = tensorrt_ptr::unique_pointer<nvonnxparser::IParser>(nvonnxparser::createParser(*trt_network, trt_logger));
         bool is_model_supported = false;
+
+#if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 14) || NV_TENSORRT_MAJOR > 10
+        if (dla_capability_) {
+          std::cout << "dla_capability_ parser" << std::endl;
+          trt_parser->setFlag(nvonnxparser::OnnxParserFlag::kREPORT_CAPABILITY_DLA);
+          trt_parser->setFlag(nvonnxparser::OnnxParserFlag::kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA);
+          auto ret = trt_parser->setBuilderConfig(trt_config.get());
+          std::cout << "ret parser" << ret << std::endl;
+        }
+#endif
 
 #if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 1) || NV_TENSORRT_MAJOR > 10
 #if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 12) || NV_TENSORRT_MAJOR > 10
@@ -3145,6 +3164,16 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
   auto trt_config = std::unique_ptr<nvinfer1::IBuilderConfig>(trt_builder->createBuilderConfig());
   auto trt_parser = tensorrt_ptr::unique_pointer<nvonnxparser::IParser>(nvonnxparser::createParser(*trt_network, trt_logger));
 
+#if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 14) || NV_TENSORRT_MAJOR > 10
+  if (dla_capability_) {
+    std::cout << "dla_capability_ parser2" << std::endl;
+    trt_parser->setFlag(nvonnxparser::OnnxParserFlag::kREPORT_CAPABILITY_DLA);
+    trt_parser->setFlag(nvonnxparser::OnnxParserFlag::kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA);
+    auto ret = trt_parser->setBuilderConfig(trt_config.get());
+    std::cout << "ret parser2" << ret << std::endl;
+  }
+#endif
+
 #if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 12) || NV_TENSORRT_MAJOR > 10
   if (load_user_initializer_) {
     trt_parser->loadModelProto(string_buf.data(), string_buf.size(), model_path_);
@@ -3394,7 +3423,9 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
           dla_core_ = 0;
         }
         LOGS_DEFAULT(VERBOSE) << "[TensorRT EP] use DLA core " << dla_core_;
-        trt_config->setFlag(nvinfer1::BuilderFlag::kGPU_FALLBACK);
+        if (!dla_capability_) {
+          trt_config->setFlag(nvinfer1::BuilderFlag::kGPU_FALLBACK);
+        }
         trt_config->setDefaultDeviceType(nvinfer1::DeviceType::kDLA);
         trt_config->setDLACore(dla_core_);
         trt_node_name_with_precision += "_dlacore" + std::to_string(dla_core_);
@@ -4020,7 +4051,18 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
       // Set DLA (DLA can only run with FP16 or INT8)
       if ((trt_state->fp16_enable || trt_state->int8_enable) && trt_state->dla_enable) {
         LOGS_DEFAULT(VERBOSE) << "[TensorRT EP] use DLA core " << trt_state->dla_core;
-        trt_config->setFlag(nvinfer1::BuilderFlag::kGPU_FALLBACK);
+        if (dla_capability_) {
+#if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 14) || NV_TENSORRT_MAJOR > 10
+          LOGS_DEFAULT(VERBOSE) << "[TensorRT EP] DLA capability is enabled - any DLA unsupported operators will be run on CPU";
+#else
+          LOGS_DEFAULT(WARNING) << "[TensorRT EP] DLA capability is enabled, but TRT version is not supported. GPU fallback will be enabled";
+          trt_config->setFlag(nvinfer1::BuilderFlag::kGPU_FALLBACK);
+#endif
+        }
+        else
+        {
+          trt_config->setFlag(nvinfer1::BuilderFlag::kGPU_FALLBACK);
+        }
         trt_config->setDefaultDeviceType(nvinfer1::DeviceType::kDLA);
         trt_config->setDLACore(trt_state->dla_core);
       }
