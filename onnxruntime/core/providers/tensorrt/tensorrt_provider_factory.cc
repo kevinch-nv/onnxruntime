@@ -124,6 +124,8 @@ struct Tensorrt_Provider : Provider {
     info.op_types_to_exclude = options.trt_op_types_to_exclude == nullptr ? "" : options.trt_op_types_to_exclude;
     info.preview_features = options.trt_preview_features == nullptr ? "" : options.trt_preview_features;
     info.load_user_initializer = options.trt_load_user_initializer != 0;
+    info.parser_flag_dla_asym_quant = options.trt_parser_flag_dla_asym_quant != 0;
+    info.parser_flag_dla_capability = options.trt_parser_flag_dla_capability != 0;
 
     return std::make_shared<TensorrtProviderFactory>(info);
   }

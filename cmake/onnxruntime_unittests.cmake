@@ -2125,6 +2125,13 @@ if (onnxruntime_BUILD_SHARED_LIB AND
           LIBS ${onnxruntime_autoep_test_LIBS}
           DEPENDS ${all_dependencies} example_plugin_ep example_plugin_ep_virt_gpu
   )
+
+  if (UNIX AND (onnxruntime_USE_TENSORRT OR onnxruntime_USE_NV))
+    # The test_main.cc includes NvInfer.h where it has many deprecated declarations
+    # simply ignore them for TensorRT EP build
+    set_property(TARGET onnxruntime_autoep_test APPEND_STRING PROPERTY COMPILE_FLAGS "-Wno-deprecated-declarations")
+  endif()
+
 endif()
 
 if (onnxruntime_BUILD_SHARED_LIB AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten" AND NOT onnxruntime_MINIMAL_BUILD)

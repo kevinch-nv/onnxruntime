@@ -1383,6 +1383,27 @@ TensorrtExecutionProvider::TensorrtExecutionProvider(const TensorrtExecutionProv
       dla_enable_ = info.dla_enable;
       dla_core_ = info.dla_core;
     }
+
+    // Handle ONNX parser flags
+    if (info.parser_flag_dla_asym_quant) // Only available in 10.11+
+    {
+      std::cout << "reading dla" << std::endl;
+#if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 10) || NV_TENSORRT_MAJOR > 10
+      parser_flags_ |= 1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA);
+#else
+      LOGS_DEFAULT(WARNING) << "[TensorRT EP] trt_parser_flag_dla_asym_quant was set but requires at least TensorRT 10.11. Ignoring this flag.";
+#endif
+    }
+    if (info.parser_flag_dla_capability) // Only available in 10.15+
+    {
+      std::cout << "reading dla2" << std::endl;
+#if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 14) || NV_TENSORRT_MAJOR > 10
+      parser_flags_ |= 1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kREPORT_CAPABILITY_DLA);
+#else
+      LOGS_DEFAULT(WARNING) << "[TensorRT EP] trt_parser_flag_dla_capability was set but requires at least TensorRT 10.15. Ignoring this flag.";
+#endif
+    }
+
     dump_subgraphs_ = info.dump_subgraphs;
     engine_cache_enable_ = info.engine_cache_enable;
     weight_stripped_engine_enable_ = info.weight_stripped_engine_enable;
@@ -1445,6 +1466,7 @@ TensorrtExecutionProvider::TensorrtExecutionProvider(const TensorrtExecutionProv
     preview_features_ = ParseTrtPreviewFeatures(info.preview_features);
     load_user_initializer_ = info.load_user_initializer;
   } else {
+    std::cout << " no trt options" << std::endl;
     try {
       const std::string max_partition_iterations_env = onnxruntime::GetEnvironmentVar(tensorrt_env_vars::kMaxPartitionIterations);
       if (!max_partition_iterations_env.empty()) {
@@ -1847,7 +1869,10 @@ TensorrtExecutionProvider::TensorrtExecutionProvider(const TensorrtExecutionProv
                         << ", trt_onnx_model_bytestream_size_: " << onnx_model_bytestream_size_
                         << ", trt_onnx_external_data_bytestream_size: " << onnx_external_data_bytestream_size_
                         << ", trt_op_types_to_exclude: " << op_types_to_exclude_
-                        << ", trt_load_user_initializer: " << load_user_initializer_;
+                        << ", trt_load_user_initializer: " << load_user_initializer_
+                        << ", trt_parser_flag_dla_asym_quant: " << info.parser_flag_dla_asym_quant
+                        << ", trt_parser_flag_dla_capability: " << info.parser_flag_dla_capability
+                        ;
 }
 
 TensorrtExecutionProvider::~TensorrtExecutionProvider() {
@@ -2377,6 +2402,7 @@ SubGraphCollection_t TensorrtExecutionProvider::GetSupportedList(SubGraphCollect
 
         auto trt_network = std::unique_ptr<nvinfer1::INetworkDefinition>(trt_builder->createNetworkV2(network_flags));
         auto trt_parser = tensorrt_ptr::unique_pointer<nvonnxparser::IParser>(nvonnxparser::createParser(*trt_network, trt_logger));
+        trt_parser->setFlags(parser_flags_);
         bool is_model_supported = false;
 
 #if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 1) || NV_TENSORRT_MAJOR > 10
@@ -3144,6 +3170,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
   auto trt_network = std::unique_ptr<nvinfer1::INetworkDefinition>(trt_builder->createNetworkV2(network_flags));
   auto trt_config = std::unique_ptr<nvinfer1::IBuilderConfig>(trt_builder->createBuilderConfig());
   auto trt_parser = tensorrt_ptr::unique_pointer<nvonnxparser::IParser>(nvonnxparser::createParser(*trt_network, trt_logger));
+  trt_parser->setFlags(parser_flags_);
 
 #if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 12) || NV_TENSORRT_MAJOR > 10
   if (load_user_initializer_) {

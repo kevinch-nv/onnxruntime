@@ -368,6 +368,7 @@ class TensorrtExecutionProvider : public IExecutionProvider {
   std::string op_types_to_exclude_;
   std::vector<nvinfer1::PreviewFeature> preview_features_;
   bool load_user_initializer_ = false;
+  uint32_t parser_flags_ = 0;
 
   // The format is as for TENSORRT_VERSION: (MAJOR * 100 + MINOR) * 100 + PATCH
   int32_t trt_version_;

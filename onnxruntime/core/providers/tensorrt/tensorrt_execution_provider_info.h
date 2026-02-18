@@ -66,6 +66,8 @@ struct TensorrtExecutionProviderInfo {
   std::string op_types_to_exclude{""};
   std::string preview_features{""};
   bool load_user_initializer{false};
+  bool parser_flag_dla_asym_quant{false};
+  bool parser_flag_dla_capability{false};
 
   static TensorrtExecutionProviderInfo FromProviderOptions(const ProviderOptions& options);
   static ProviderOptions ToProviderOptions(const TensorrtExecutionProviderInfo& info);

@@ -97,4 +97,6 @@ struct OrtTensorRTProviderOptionsV2 {
   int trt_engine_hw_compatible{0};                    // Enable hardware compatibility. Default 0 = false, nonzero = true
   const char* trt_op_types_to_exclude{};              // Exclude specific ops from running on TRT.
   int trt_load_user_initializer{0};                   // Save initializers locally instead of to disk. Default 0 = false, nonzero = true
+  int trt_parser_flag_dla_asym_quant{0};              // Set OnnxParserFlag::kENABLE_UINT8_AND_ASYMMETRIC_QUANTIZATION_DLA. Default 0 = not set, nonzero = set
+  int trt_parser_flag_dla_capability{0};              // Set OnnxParserFlag::kREPORT_CAPABILITY_DLA. Default 0 = not set, nonzero = set
 };

@@ -62,6 +62,8 @@ constexpr const char* kExternalDataBytestreamSize = "trt_external_data_bytestrea
 constexpr const char* kOpTypesToExclude = "trt_op_types_to_exclude";
 constexpr const char* kPreviewFeatures = "trt_preview_features";
 constexpr const char* kGraphIncludeInitializer = "trt_load_user_initializer";
+constexpr const char* kParserFlagAsymQuant = "trt_parser_flag_dla_asym_quant";
+constexpr const char* kParserFlagDLACapability = "trt_parser_flag_dla_capability";
 
 }  // namespace provider_option_names
 }  // namespace tensorrt
@@ -154,6 +156,8 @@ TensorrtExecutionProviderInfo TensorrtExecutionProviderInfo::FromProviderOptions
           .AddAssignmentToReference(tensorrt::provider_option_names::kOpTypesToExclude, info.op_types_to_exclude)
           .AddAssignmentToReference(tensorrt::provider_option_names::kPreviewFeatures, info.preview_features)
           .AddAssignmentToReference(tensorrt::provider_option_names::kGraphIncludeInitializer, info.load_user_initializer)
+          .AddAssignmentToReference(tensorrt::provider_option_names::kParserFlagAsymQuant, info.parser_flag_dla_asym_quant)
+          .AddAssignmentToReference(tensorrt::provider_option_names::kParserFlagDLACapability, info.parser_flag_dla_capability)
           .Parse(options));  // add new provider option here.
 
   info.user_compute_stream = user_compute_stream;
@@ -215,6 +219,8 @@ ProviderOptions TensorrtExecutionProviderInfo::ToProviderOptions(const TensorrtE
       {tensorrt::provider_option_names::kOpTypesToExclude, MakeStringWithClassicLocale(info.op_types_to_exclude)},
       {tensorrt::provider_option_names::kPreviewFeatures, MakeStringWithClassicLocale(info.preview_features)},
       {tensorrt::provider_option_names::kGraphIncludeInitializer, MakeStringWithClassicLocale(info.load_user_initializer)},
+      {tensorrt::provider_option_names::kParserFlagAsymQuant, MakeStringWithClassicLocale(info.parser_flag_dla_asym_quant)},
+      {tensorrt::provider_option_names::kParserFlagDLACapability, MakeStringWithClassicLocale(info.parser_flag_dla_capability)},
   };
   return options;
 }
@@ -284,6 +290,8 @@ ProviderOptions TensorrtExecutionProviderInfo::ToProviderOptions(const OrtTensor
       {tensorrt::provider_option_names::kExternalDataBytestreamSize, MakeStringWithClassicLocale(info.trt_external_data_bytestream_size)},
       {tensorrt::provider_option_names::kOpTypesToExclude, kOpTypesToExclude_},
       {tensorrt::provider_option_names::kGraphIncludeInitializer, MakeStringWithClassicLocale(info.trt_load_user_initializer)},
+      {tensorrt::provider_option_names::kParserFlagAsymQuant, MakeStringWithClassicLocale(info.trt_parser_flag_dla_asym_quant)},
+      {tensorrt::provider_option_names::kParserFlagDLACapability, MakeStringWithClassicLocale(info.trt_parser_flag_dla_capability)},
   };
   return options;
 }
@@ -394,5 +402,7 @@ void TensorrtExecutionProviderInfo::UpdateProviderOptions(void* provider_options
   trt_provider_options_v2.trt_op_types_to_exclude = copy_string_if_needed(internal_options.op_types_to_exclude);
   trt_provider_options_v2.trt_preview_features = copy_string_if_needed(internal_options.preview_features);
   trt_provider_options_v2.trt_load_user_initializer = internal_options.load_user_initializer;
+  trt_provider_options_v2.trt_parser_flag_dla_asym_quant = internal_options.parser_flag_dla_asym_quant;
+  trt_provider_options_v2.trt_parser_flag_dla_capability = internal_options.parser_flag_dla_capability;
 }
 }  // namespace onnxruntime
