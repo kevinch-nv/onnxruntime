@@ -27,6 +27,7 @@
 #include <filesystem>
 // TODO: find a better way to share this
 #include "core/providers/cuda/cuda_stream_handle.h"
+#include <iostream>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -892,6 +893,7 @@ Status BindContextInput(Ort::KernelContext& ctx,
                         OrtAllocator* alloc,
                         cudaStream_t stream) {
   auto input_tensor = ctx.GetInput(input_index);
+
   auto tensor_info = input_tensor.GetTensorTypeAndShapeInfo();
   const auto tensor_shapes = tensor_info.GetShape();
   const auto tensor_type = tensor_info.GetElementType();
@@ -2390,6 +2392,8 @@ SubGraphCollection_t TensorrtExecutionProvider::GetSupportedList(SubGraphCollect
 
         auto trt_network = std::unique_ptr<nvinfer1::INetworkDefinition>(trt_builder->createNetworkV2(network_flags));
         auto trt_parser = tensorrt_ptr::unique_pointer<nvonnxparser::IParser>(nvonnxparser::createParser(*trt_network, trt_logger));
+        std::cout << "Setting flags for parser" << std::endl;
+        trt_parser->setFlags(1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kADJUST_FOR_DLA));
         bool is_model_supported = false;
 
 #if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 1) || NV_TENSORRT_MAJOR > 10
@@ -3152,6 +3156,8 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
   auto trt_network = std::unique_ptr<nvinfer1::INetworkDefinition>(trt_builder->createNetworkV2(network_flags));
   auto trt_config = std::unique_ptr<nvinfer1::IBuilderConfig>(trt_builder->createBuilderConfig());
   auto trt_parser = tensorrt_ptr::unique_pointer<nvonnxparser::IParser>(nvonnxparser::createParser(*trt_network, trt_logger));
+  std::cout << "Setting flags for parser" << std::endl;
+  trt_parser->setFlags(1U << static_cast<uint32_t>(nvonnxparser::OnnxParserFlag::kADJUST_FOR_DLA));
 
 #if (NV_TENSORRT_MAJOR == 10 && NV_TENSORRT_MINOR > 12) || NV_TENSORRT_MAJOR > 10
   if (load_user_initializer_) {
@@ -3332,7 +3338,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
 #pragma warning(push)
 #pragma warning(disable : 4996)
 #endif
-    if (!trt_builder->platformHasFastFp16()) {
+    if (false) {
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
@@ -3347,7 +3353,7 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
 #pragma warning(push)
 #pragma warning(disable : 4996)
 #endif
-    if (!trt_builder->platformHasFastInt8()) {
+    if (false) {
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
@@ -3586,8 +3592,8 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
 #pragma warning(disable : 4996)
 #endif
         // Set INT8 per tensor dynamic range
-        if (int8_enable_ && trt_builder->platformHasFastInt8() && int8_calibration_cache_available_) {
-          trt_config->setInt8Calibrator(nullptr);
+        if (int8_enable_ && true && int8_calibration_cache_available_) {
+          //trt_config->setInt8Calibrator(nullptr);
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
@@ -4000,8 +4006,8 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
 #pragma warning(disable : 4996)
 #endif
       // Set INT8 Per Tensor Dynamic range
-      if (trt_state->int8_enable && trt_builder->platformHasFastInt8() && trt_state->int8_calibration_cache_available) {
-        trt_config->setInt8Calibrator(nullptr);
+      if (trt_state->int8_enable && true && trt_state->int8_calibration_cache_available) {
+        // trt_config->setInt8Calibrator(nullptr);
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
@@ -4321,6 +4327,90 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromGraph(const GraphView
       cuda_graph_.SetStream(stream);
       CaptureBegin(0);
     }
+
+    // Debug: dump input bindings (shape + typed values) before inference
+    // cudaStreamSynchronize(stream);
+    // for (size_t i = 0, end = input_binding_names.size(); i < end; ++i) {
+    //   char const* input_name = input_binding_names[i];
+    //   nvinfer1::Dims dims = trt_context->getTensorShape(input_name);
+    //   void const* dev_addr = trt_context->getTensorAddress(input_name);
+    //   nvinfer1::DataType dtype = trt_engine->getTensorDataType(input_name);
+
+    //   int64_t elem_count = 1;
+    //   for (int d = 0; d < dims.nbDims; ++d) elem_count *= dims.d[d];
+    //   size_t elem_bytes = 0;
+    //   const char* dtype_str = "unknown";
+    //   switch (dtype) {
+    //     case nvinfer1::DataType::kFLOAT:  elem_bytes = 4; dtype_str = "float32"; break;
+    //     case nvinfer1::DataType::kHALF:   elem_bytes = 2; dtype_str = "float16"; break;
+    //     case nvinfer1::DataType::kINT8:   elem_bytes = 1; dtype_str = "int8";    break;
+    //     case nvinfer1::DataType::kINT32:  elem_bytes = 4; dtype_str = "int32";   break;
+    //     case nvinfer1::DataType::kINT64:  elem_bytes = 8; dtype_str = "int64";   break;
+    //     case nvinfer1::DataType::kBOOL:   elem_bytes = 1; dtype_str = "bool";    break;
+    //     default:                          elem_bytes = 0; dtype_str = "other";   break;
+    //   }
+
+    //   std::cout << "[TRT EP DEBUG] Input[" << i << "] name=" << input_name
+    //             << " dtype=" << dtype_str << " ptr=" << dev_addr << " shape=[";
+    //   for (int d = 0; d < dims.nbDims; ++d) {
+    //     std::cout << dims.d[d];
+    //     if (d < dims.nbDims - 1) std::cout << ",";
+    //   }
+    //   std::cout << "] values=";
+
+    //   if (dev_addr == nullptr || elem_bytes == 0 || elem_count <= 0) {
+    //     std::cout << "<unavailable>";
+    //   } else {
+    //     std::vector<uint8_t> host_buf(static_cast<size_t>(elem_count) * elem_bytes);
+    //     cudaMemcpy(host_buf.data(), dev_addr, host_buf.size(), cudaMemcpyDeviceToHost);
+    //     bool all_zero = std::all_of(host_buf.begin(), host_buf.end(), [](uint8_t b) { return b == 0; });
+    //     if (all_zero) {
+    //       std::cout << "<all zeros>";
+    //       std::cout << std::endl;
+    //       continue;
+    //     }
+    //     else
+    //     {
+    //       std::cout << "<non-zero>" << std::endl;
+    //       continue;
+    //     }
+    //     std::cout << "[";
+    //     for (int64_t e = 0; e < elem_count; ++e) {
+    //       if (e > 0) std::cout << ",";
+    //       switch (dtype) {
+    //         case nvinfer1::DataType::kFLOAT: {
+    //           float v; memcpy(&v, host_buf.data() + e * 4, 4); std::cout << v; break;
+    //         }
+    //         case nvinfer1::DataType::kHALF: {
+    //           uint16_t bits; memcpy(&bits, host_buf.data() + e * 2, 2);
+    //           uint32_t sign = (bits >> 15) & 0x1u;
+    //           uint32_t exp  = (bits >> 10) & 0x1fu;
+    //           uint32_t mant = bits & 0x3ffu;
+    //           float f;
+    //           if (exp == 0 && mant == 0) { f = 0.0f; }
+    //           else if (exp == 31) { f = (mant == 0) ? (sign ? -INFINITY : INFINITY) : NAN; }
+    //           else { uint32_t f32 = (sign << 31) | ((exp - 15 + 127) << 23) | (mant << 13); memcpy(&f, &f32, 4); }
+    //           std::cout << f; break;
+    //         }
+    //         case nvinfer1::DataType::kINT8: {
+    //           int8_t v; memcpy(&v, host_buf.data() + e, 1); std::cout << static_cast<int>(v); break;
+    //         }
+    //         case nvinfer1::DataType::kINT32: {
+    //           int32_t v; memcpy(&v, host_buf.data() + e * 4, 4); std::cout << v; break;
+    //         }
+    //         case nvinfer1::DataType::kINT64: {
+    //           int64_t v; memcpy(&v, host_buf.data() + e * 8, 8); std::cout << v; break;
+    //         }
+    //         case nvinfer1::DataType::kBOOL: {
+    //           std::cout << (host_buf[static_cast<size_t>(e)] ? "true" : "false"); break;
+    //         }
+    //         default: std::cout << "?"; break;
+    //       }
+    //     }
+    //     std::cout << "]";
+    //   }
+    //   std::cout << std::endl;
+    // }
 
     // Run TRT inference
     if (!trt_context->enqueueV3(stream)) {
@@ -4652,6 +4742,90 @@ Status TensorrtExecutionProvider::CreateNodeComputeInfoFromPrecompiledEngine(con
       cuda_graph_.SetStream(stream);
       CaptureBegin(0);
     }
+
+    // Debug: dump input bindings (shape + typed values) before inference
+    // cudaStreamSynchronize(stream);
+    // for (size_t i = 0, end = input_binding_names.size(); i < end; ++i) {
+    //   char const* input_name = input_binding_names[i];
+    //   nvinfer1::Dims dims = trt_context->getTensorShape(input_name);
+    //   void const* dev_addr = trt_context->getTensorAddress(input_name);
+    //   nvinfer1::DataType dtype = trt_engine->getTensorDataType(input_name);
+
+    //   int64_t elem_count = 1;
+    //   for (int d = 0; d < dims.nbDims; ++d) elem_count *= dims.d[d];
+    //   size_t elem_bytes = 0;
+    //   const char* dtype_str = "unknown";
+    //   switch (dtype) {
+    //     case nvinfer1::DataType::kFLOAT:  elem_bytes = 4; dtype_str = "float32"; break;
+    //     case nvinfer1::DataType::kHALF:   elem_bytes = 2; dtype_str = "float16"; break;
+    //     case nvinfer1::DataType::kINT8:   elem_bytes = 1; dtype_str = "int8";    break;
+    //     case nvinfer1::DataType::kINT32:  elem_bytes = 4; dtype_str = "int32";   break;
+    //     case nvinfer1::DataType::kINT64:  elem_bytes = 8; dtype_str = "int64";   break;
+    //     case nvinfer1::DataType::kBOOL:   elem_bytes = 1; dtype_str = "bool";    break;
+    //     default:                          elem_bytes = 0; dtype_str = "other";   break;
+    //   }
+
+    //   std::cout << "[TRT EP DEBUG] Input[" << i << "] name=" << input_name
+    //             << " dtype=" << dtype_str << " ptr=" << dev_addr << " shape=[";
+    //   for (int d = 0; d < dims.nbDims; ++d) {
+    //     std::cout << dims.d[d];
+    //     if (d < dims.nbDims - 1) std::cout << ",";
+    //   }
+    //   std::cout << "] values=";
+
+    //   if (dev_addr == nullptr || elem_bytes == 0 || elem_count <= 0) {
+    //     std::cout << "<unavailable>";
+    //   } else {
+    //     std::vector<uint8_t> host_buf(static_cast<size_t>(elem_count) * elem_bytes);
+    //     cudaMemcpy(host_buf.data(), dev_addr, host_buf.size(), cudaMemcpyDeviceToHost);
+    //     bool all_zero = std::all_of(host_buf.begin(), host_buf.end(), [](uint8_t b) { return b == 0; });
+    //     if (all_zero) {
+    //       std::cout << "<all zeros>";
+    //       std::cout << std::endl;
+    //       continue;
+    //     }
+    //     else
+    //     {
+    //       std::cout << "<non-zero>" << std::endl;
+    //       continue;
+    //     }
+    //     std::cout << "[";
+    //     for (int64_t e = 0; e < elem_count; ++e) {
+    //       if (e > 0) std::cout << ",";
+    //       switch (dtype) {
+    //         case nvinfer1::DataType::kFLOAT: {
+    //           float v; memcpy(&v, host_buf.data() + e * 4, 4); std::cout << v; break;
+    //         }
+    //         case nvinfer1::DataType::kHALF: {
+    //           uint16_t bits; memcpy(&bits, host_buf.data() + e * 2, 2);
+    //           uint32_t sign = (bits >> 15) & 0x1u;
+    //           uint32_t exp  = (bits >> 10) & 0x1fu;
+    //           uint32_t mant = bits & 0x3ffu;
+    //           float f;
+    //           if (exp == 0 && mant == 0) { f = 0.0f; }
+    //           else if (exp == 31) { f = (mant == 0) ? (sign ? -INFINITY : INFINITY) : NAN; }
+    //           else { uint32_t f32 = (sign << 31) | ((exp - 15 + 127) << 23) | (mant << 13); memcpy(&f, &f32, 4); }
+    //           std::cout << f; break;
+    //         }
+    //         case nvinfer1::DataType::kINT8: {
+    //           int8_t v; memcpy(&v, host_buf.data() + e, 1); std::cout << static_cast<int>(v); break;
+    //         }
+    //         case nvinfer1::DataType::kINT32: {
+    //           int32_t v; memcpy(&v, host_buf.data() + e * 4, 4); std::cout << v; break;
+    //         }
+    //         case nvinfer1::DataType::kINT64: {
+    //           int64_t v; memcpy(&v, host_buf.data() + e * 8, 8); std::cout << v; break;
+    //         }
+    //         case nvinfer1::DataType::kBOOL: {
+    //           std::cout << (host_buf[static_cast<size_t>(e)] ? "true" : "false"); break;
+    //         }
+    //         default: std::cout << "?"; break;
+    //       }
+    //     }
+    //     std::cout << "]";
+    //   }
+    //   std::cout << std::endl;
+    // }
 
     // Run TRT inference
     if (!trt_context->enqueueV3(stream)) {
